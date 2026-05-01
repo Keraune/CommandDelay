@@ -63,8 +63,35 @@ settings:
 # - ACTIONBAR
 # - SOUND
 #
-# Placeholders internos disponibles:
+# Placeholders internos disponibles en acciones:
 # %schedule%, %event_id%, %online%, %targets%, %min_players%, %player%, %world%, %x%, %y%, %z%
+#
+# Placeholders externos para PlaceholderAPI:
+# Globales:
+# %commanddelay_next_schedule%
+# %commanddelay_next_action%
+# %commanddelay_next_status%
+# %commanddelay_next_remaining%
+# %commanddelay_next_remaining_long%
+# %commanddelay_next_remaining_compact%
+# %commanddelay_next_remaining_clock%
+# %commanddelay_next_remaining_clock_full%
+# %commanddelay_next_remaining_seconds%
+# %commanddelay_next_time%
+# %commanddelay_next_datetime%
+#
+# Por horario:
+# %commanddelay_remaining_<id>%
+# %commanddelay_remaining_long_<id>%
+# %commanddelay_remaining_clock_<id>%
+# %commanddelay_remaining_seconds_<id>%
+# %commanddelay_next_action_<id>%
+# %commanddelay_status_<id>%
+#
+# También soporta el estilo:
+# %commanddelay_<id>_remaining%
+# %commanddelay_<id>_remaining_clock%
+# %commanddelay_<id>_next_action%
 
 schedules:
   boss_dragon_infernal:

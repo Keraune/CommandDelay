@@ -5,6 +5,7 @@ import dev.keraune.commanddelay.config.MessageService;
 import dev.keraune.commanddelay.config.PluginSettings;
 import dev.keraune.commanddelay.data.ExecutionHistory;
 import dev.keraune.commanddelay.model.ActionType;
+import dev.keraune.commanddelay.model.NextActionSnapshot;
 import dev.keraune.commanddelay.model.ScheduleDefinition;
 import dev.keraune.commanddelay.model.ScheduleRequirements;
 import dev.keraune.commanddelay.model.ScheduledAction;
@@ -30,6 +31,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Comparator;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
@@ -62,6 +65,9 @@ public final class ScheduleRunner {
 
     /** Horarios actualmente ejecutándose. Previene solapamientos y duplicados. */
     private final Set<String> activeSchedules = new HashSet<>();
+
+    /** Fecha y hora de inicio de cada ejecución activa. Se usa para placeholders de cuenta regresiva. */
+    private final Map<String, ZonedDateTime> activeScheduleStarts = new HashMap<>();
 
     /** Acciones con delay pendientes. Se cancelan al hacer reload/disable para evitar duplicados. */
     private final Map<String, List<BukkitTask>> pendingActionTasks = new HashMap<>();
@@ -110,6 +116,72 @@ public final class ScheduleRunner {
 
     public void runNow(ScheduleDefinition schedule) {
         executeSchedule(schedule);
+    }
+
+    /**
+     * Devuelve la configuración activa del runner.
+     *
+     * <p>Se expone para PlaceholderAPI sin obligar a leer config.yml en cada consulta.</p>
+     */
+    public PluginSettings settings() {
+        return settings;
+    }
+
+    /**
+     * Calcula la próxima acción global entre todos los horarios habilitados.
+     */
+    public Optional<NextActionSnapshot> nextAction() {
+        if (settings == null) {
+            return Optional.empty();
+        }
+
+        return scheduleRepository.all().stream()
+                .filter(ScheduleDefinition::enabled)
+                .map(this::nextActionForSchedule)
+                .flatMap(Optional::stream)
+                .min(Comparator.comparing(NextActionSnapshot::dueAt));
+    }
+
+    /**
+     * Calcula la próxima acción de un horario específico.
+     */
+    public Optional<NextActionSnapshot> nextAction(String scheduleId) {
+        if (settings == null || scheduleId == null || scheduleId.isBlank()) {
+            return Optional.empty();
+        }
+
+        return scheduleRepository.find(scheduleId)
+                .filter(ScheduleDefinition::enabled)
+                .flatMap(this::nextActionForSchedule);
+    }
+
+    private Optional<NextActionSnapshot> nextActionForSchedule(ScheduleDefinition schedule) {
+        ZonedDateTime now = ZonedDateTime.now(settings.zoneId());
+        ZonedDateTime activeStart = activeScheduleStarts.get(schedule.id());
+
+        if (activeStart != null && isActive(schedule.id())) {
+            return nextActionFromStart(schedule, activeStart, now, true);
+        }
+
+        return schedule.nextExecution(settings.zoneId())
+                .flatMap(start -> nextActionFromStart(schedule, start, now, false));
+    }
+
+    private Optional<NextActionSnapshot> nextActionFromStart(
+            ScheduleDefinition schedule,
+            ZonedDateTime start,
+            ZonedDateTime now,
+            boolean active
+    ) {
+        return schedule.actions().stream()
+                .map(action -> new NextActionSnapshot(
+                        schedule.id(),
+                        action.type(),
+                        start.plusSeconds(action.delaySeconds()),
+                        active
+                ))
+                .filter(snapshot -> !snapshot.dueAt().isBefore(now))
+                .min(Comparator.comparing(NextActionSnapshot::dueAt));
     }
 
     private void tick() {
@@ -162,6 +234,8 @@ public final class ScheduleRunner {
             ));
             return;
         }
+
+        registerActiveStart(schedule.id());
 
         List<Player> targets = eligiblePlayers(schedule);
 
@@ -226,6 +300,15 @@ public final class ScheduleRunner {
         return activeSchedules.add(scheduleId);
     }
 
+    private void registerActiveStart(String scheduleId) {
+        if (settings == null) {
+            activeScheduleStarts.put(scheduleId, ZonedDateTime.now());
+            return;
+        }
+
+        activeScheduleStarts.put(scheduleId, ZonedDateTime.now(settings.zoneId()));
+    }
+
     private boolean isActive(String scheduleId) {
         return activeSchedules.contains(scheduleId);
     }
@@ -240,6 +323,7 @@ public final class ScheduleRunner {
 
     private void finishExecution(String scheduleId) {
         activeSchedules.remove(scheduleId);
+        activeScheduleStarts.remove(scheduleId);
         pendingActionTasks.remove(scheduleId);
         plugin.getLogger().info(messageService.plain(
                 "logs.schedule-finished",
@@ -262,6 +346,7 @@ public final class ScheduleRunner {
 
         pendingActionTasks.clear();
         activeSchedules.clear();
+        activeScheduleStarts.clear();
     }
 
     private void logRequirementsFailed(ScheduleDefinition schedule, int onlineTargets) {

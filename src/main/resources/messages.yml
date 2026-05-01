@@ -48,6 +48,15 @@ formats:
   next-date-time: "dd/MM/yyyy HH:mm"
   never: "Nunca"
 
+
+placeholders:
+  unavailable: "N/A"
+  status:
+    waiting: "Esperando"
+    running: "En progreso"
+    disabled: "Desactivado"
+    none: "Sin próxima acción"
+
 logs:
   plugin-enabled: "CommandDelay activado correctamente."
   plugin-disabled: "CommandDelay desactivado correctamente."
@@ -77,3 +86,6 @@ logs:
   history-load-error: "No se pudo cargar el historial de ejecuciones."
   file-created: "Archivo creado: %file%."
   file-create-error: "No se pudo crear el archivo: %file%."
+  placeholderapi-registered: "Expansión interna de PlaceholderAPI registrada correctamente."
+  placeholderapi-not-found: "PlaceholderAPI no está instalado. Los placeholders externos de CommandDelay no se registrarán."
+  placeholderapi-register-error: "No se pudo registrar la expansión interna de PlaceholderAPI."

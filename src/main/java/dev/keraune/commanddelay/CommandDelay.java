@@ -5,9 +5,11 @@ import dev.keraune.commanddelay.config.ConfigManager;
 import dev.keraune.commanddelay.config.MessageService;
 import dev.keraune.commanddelay.config.PluginSettings;
 import dev.keraune.commanddelay.data.ExecutionHistory;
+import dev.keraune.commanddelay.placeholder.CommandDelayExpansion;
 import dev.keraune.commanddelay.scheduler.ScheduleRepository;
 import dev.keraune.commanddelay.scheduler.ScheduleRunner;
 import dev.keraune.commanddelay.util.TextFormatter;
+import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -28,6 +30,7 @@ public final class CommandDelay extends JavaPlugin {
     private ExecutionHistory executionHistory;
     private ScheduleRepository scheduleRepository;
     private ScheduleRunner scheduleRunner;
+    private CommandDelayExpansion placeholderExpansion;
 
     @Override
     public void onEnable() {
@@ -41,6 +44,7 @@ public final class CommandDelay extends JavaPlugin {
 
         reloadPlugin(false);
         registerCommands();
+        registerPlaceholderExpansion();
 
         getLogger().info(messageService.plain("logs.plugin-enabled"));
     }
@@ -54,6 +58,8 @@ public final class CommandDelay extends JavaPlugin {
         if (executionHistory != null) {
             executionHistory.save();
         }
+
+        unregisterPlaceholderExpansion();
 
         if (messageService != null) {
             getLogger().info(messageService.plain("logs.plugin-disabled"));
@@ -79,6 +85,10 @@ public final class CommandDelay extends JavaPlugin {
         TextFormatter.init(settings.useMiniMessage());
         scheduleRunner.start(settings);
         executionHistory.prune(settings.historyRetentionDays(), settings.zoneId());
+
+        if (placeholderExpansion != null) {
+            placeholderExpansion.clearCache();
+        }
 
         if (notifyConsole) {
             getLogger().info(messageService.plain(
@@ -129,5 +139,37 @@ public final class CommandDelay extends JavaPlugin {
         CommandDelayCommand commandExecutor = new CommandDelayCommand(this);
         command.setExecutor(commandExecutor);
         command.setTabCompleter(commandExecutor);
+    }
+
+    /**
+     * Registra la expansión interna de PlaceholderAPI cuando el plugin está disponible.
+     *
+     * <p>Se mantiene como softdepend para que CommandDelay funcione aunque PlaceholderAPI
+     * no esté instalado en el servidor.</p>
+     */
+    private void registerPlaceholderExpansion() {
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") == null) {
+            getLogger().info(messageService.plain("logs.placeholderapi-not-found"));
+            return;
+        }
+
+        placeholderExpansion = new CommandDelayExpansion(this);
+
+        if (placeholderExpansion.register()) {
+            getLogger().info(messageService.plain("logs.placeholderapi-registered"));
+            return;
+        }
+
+        getLogger().warning(messageService.plain("logs.placeholderapi-register-error"));
+        placeholderExpansion = null;
+    }
+
+    private void unregisterPlaceholderExpansion() {
+        if (placeholderExpansion == null) {
+            return;
+        }
+
+        placeholderExpansion.unregister();
+        placeholderExpansion = null;
     }
 }
