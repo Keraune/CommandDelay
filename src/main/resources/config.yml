@@ -1,0 +1,130 @@
+# =====================================================
+# CommandDelay - Configuración principal
+# =====================================================
+# Plugin para ejecutar acciones programadas en horarios fijos.
+# Pensado para eventos automáticos como bosses de MythicMobs.
+#
+# Formato de hora: HH:mm. Ejemplos: "08:00", "20:30", "23:55".
+# Los comandos se ejecutan desde consola. Puedes escribirlos con o sin "/".
+#
+# Formatos de texto soportados en anuncios:
+# - Legacy: &a, &c, &l
+# - Hex: &#FFAA00, <#FFAA00>, #FFAA00
+# - Tags simples: <red>, <green>, <bold>, <reset>
+# - Gradientes: <gradient:#FF0000:#FFFF00>Texto</gradient>
+# - PlaceholderAPI en anuncios y comandos, si el plugin está instalado.
+
+settings:
+  # Zona horaria usada para calcular los horarios.
+  # timezone: "America/Argentina/Buenos_Aires"
+  timezone: "America/Lima"
+
+  # Cada cuántos segundos el plugin revisa si hay horarios pendientes.
+  # Recomendado: 10 a 30 segundos.
+  check-interval-seconds: 20
+
+  # Si está en true, se elimina automáticamente el primer "/" de cada comando.
+  remove-leading-slash: true
+
+  # Si está en true, los colores dentro de comandos serán convertidos a colores de Minecraft.
+  translate-command-colors: true
+
+  # Activa el puente MiniMessage/legacy inspirado en tu sistema de SpookyMenus.
+  use-minimessage: true
+
+  # Soporte opcional para PlaceholderAPI en anuncios y comandos.
+  placeholderapi:
+    enabled: true
+
+  # Cantidad de días que se conservarán en el historial interno de ejecuciones.
+  # Este historial evita que un mismo horario se ejecute dos veces dentro del mismo minuto.
+  history-retention-days: 30
+
+  # Muestra más información técnica en consola.
+  debug: false
+
+# =====================================================
+# Horarios disponibles
+# =====================================================
+# days acepta:
+# - "TODOS" o "ALL"
+# - LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, SABADO, DOMINGO
+# - MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY
+#
+# requirements es opcional:
+# - min-players-online: mínimo de jugadores que deben recibir/activar el evento.
+# - worlds: limita jugadores objetivo por mundo.
+# - permission: limita jugadores objetivo por permiso.
+#
+# actions soporta:
+# - COMMAND
+# - CHAT / BROADCAST
+# - TITLE
+# - ACTIONBAR
+# - SOUND
+#
+# Placeholders internos disponibles:
+# %schedule%, %event_id%, %online%, %targets%, %min_players%, %player%, %world%, %x%, %y%, %z%
+
+schedules:
+  boss_dragon_infernal:
+    enabled: false
+    days:
+      - "TODOS"
+    times:
+      - "20:00"
+    requirements:
+      min-players-online: 1
+      worlds: []
+      permission: ""
+    actions:
+      - type: "CHAT"
+        delay-seconds: 0
+        messages:
+          - ""
+          - "<dark_gray>[<gradient:#FFAA00:#FF3300><bold>Boss</bold></gradient><dark_gray>] <yellow>El boss <red><bold>Dragón Infernal</bold></red> aparecerá en <white>5 minutos</white>."
+          - "<gray>Jugadores conectados: <green>%online%</green>. Prepárate, <aqua>%player%</aqua>."
+          - ""
+
+      - type: "TITLE"
+        delay-seconds: 240
+        title: "<red><bold>¡Boss próximo!</bold>"
+        subtitle: "<yellow>Dragón Infernal aparecerá en 1 minuto"
+        fade-in-ticks: 10
+        stay-ticks: 60
+        fade-out-ticks: 20
+
+      - type: "ACTIONBAR"
+        delay-seconds: 270
+        message: "<gold>El boss aparecerá en <red>30 segundos</red>..."
+
+      - type: "SOUND"
+        delay-seconds: 295
+        sound: "entity.ender_dragon.growl"
+        volume: 1.0
+        pitch: 1.0
+
+      - type: "COMMAND"
+        delay-seconds: 300
+        command: "mm mobs spawn DragonInfernal 1 world,100,70,100"
+
+      - type: "CHAT"
+        delay-seconds: 300
+        messages:
+          - ""
+          - "<dark_gray>[<red><bold>Boss</bold></red><dark_gray>] <red>¡El Dragón Infernal ha aparecido!"
+          - "<gray>Ve a la zona del evento para enfrentarlo."
+          - ""
+
+  # Formato simple
+  mantenimiento_nocturno:
+    enabled: false
+    days:
+      - "TODOS"
+    times:
+      - "23:55"
+    commands:
+      - command: "say &eEl servidor guardará el mundo en 5 segundos."
+        delay-seconds: 0
+      - command: "save-all"
+        delay-seconds: 5

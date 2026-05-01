@@ -1,0 +1,79 @@
+# =====================================================
+# CommandDelay - Mensajes
+# =====================================================
+# Placeholders frecuentes:
+# %prefix%, %schedule%, %command%, %delay%, %timezone%, %interval%, %total%, %next%, %action%
+# Soporta &, hex, tags simples, gradientes y MiniMessage básico.
+
+prefix: "&8[<#42C6FF><bold>CommandDelay</bold>&8]"
+
+commands:
+  no-permission: "%prefix% &cNo tienes permiso para usar este comando."
+  unknown-subcommand: "%prefix% &cSubcomando desconocido. Usa &f/commanddelay help&c."
+  help:
+    - "&8&m--------------------------------------------------"
+    - "%prefix% &fComandos disponibles:"
+    - "&b/commanddelay help &8- &7Muestra esta ayuda."
+    - "&b/commanddelay reload &8- &7Recarga config.yml y messages.yml."
+    - "&b/commanddelay list &8- &7Lista los horarios configurados."
+    - "&b/commanddelay info <id> &8- &7Muestra detalles de un horario."
+    - "&b/commanddelay run <id> &8- &7Ejecuta manualmente un horario."
+    - "&b/commanddelay next &8- &7Muestra las próximas ejecuciones."
+    - "&8&m--------------------------------------------------"
+  reload-success: "%prefix% &aConfiguración recargada correctamente. &7Horarios cargados: &f%total%&7."
+  list-empty: "%prefix% &cNo hay horarios configurados."
+  list-header: "%prefix% &fHorarios configurados &8(&b%total%&8)&f:"
+  list-entry: "&8- &b%schedule% &8| &7Estado: %enabled% &8| &7Días: &f%days% &8| &7Horas: &f%times% &8| &7Acciones: &f%commands%"
+  enabled: "&aactivo"
+  disabled: "&cdesactivado"
+  info-usage: "%prefix% &cUso correcto: &f/commanddelay info <id>"
+  info-not-found: "%prefix% &cNo existe un horario con el id &f%schedule%&c."
+  info:
+    - "&8&m--------------------------------------------------"
+    - "%prefix% &fInformación del horario &b%schedule%"
+    - "&7Estado: %enabled%"
+    - "&7Días: &f%days%"
+    - "&7Horas: &f%times%"
+    - "&7Acciones: &f%commands%"
+    - "&7Próxima ejecución: &f%next%"
+    - "&8&m--------------------------------------------------"
+  run-usage: "%prefix% &cUso correcto: &f/commanddelay run <id>"
+  run-not-found: "%prefix% &cNo existe un horario con el id &f%schedule%&c."
+  run-started: "%prefix% &aEjecutando manualmente el horario &f%schedule%&a."
+  next-empty: "%prefix% &cNo hay próximas ejecuciones disponibles."
+  next-header: "%prefix% &fPróximas ejecuciones:"
+  next-entry: "&8- &b%schedule% &8→ &f%next%"
+
+formats:
+  next-date-time: "dd/MM/yyyy HH:mm"
+  never: "Nunca"
+
+logs:
+  plugin-enabled: "CommandDelay activado correctamente."
+  plugin-disabled: "CommandDelay desactivado correctamente."
+  scheduler-started: "Scheduler iniciado. Intervalo: %interval% segundos. Zona horaria: %timezone%."
+  scheduler-stopped: "Scheduler detenido."
+  reload-started: "Recargando configuración de CommandDelay."
+  reload-finished: "Configuración recargada. Horarios cargados: %total%."
+  invalid-timezone: "Zona horaria inválida en config.yml: %timezone%. Se usará America/Lima."
+  invalid-schedule-section: "El horario %schedule% no tiene una sección válida y será ignorado."
+  invalid-time: "El horario %schedule% contiene una hora inválida: %time%. Formato requerido: HH:mm."
+  invalid-action-entry: "El horario %schedule% contiene una acción inválida y será ignorada."
+  invalid-command-entry: "El horario %schedule% contiene un comando inválido y será ignorado."
+  schedule-without-times: "El horario %schedule% no tiene horas válidas y será ignorado."
+  schedule-without-actions: "El horario %schedule% no tiene acciones válidas y será ignorado."
+  schedule-without-commands: "El horario %schedule% no tiene comandos válidos y será ignorado."
+  schedules-loaded: "Horarios cargados: %total%."
+  requirements-failed: "No se ejecutó %schedule% porque no cumple requisitos. Online objetivo: %online%/%min_players%."
+  executing-schedule: "Ejecutando horario: %schedule%."
+  schedule-already-active: "El horario %schedule% ya está en ejecución. Se evita una ejecución duplicada."
+  schedule-finished: "Horario finalizado: %schedule%."
+  action-error: "Error ejecutando la acción %action% del horario %schedule%. Revisa el stacktrace."
+  dispatch-command: "Ejecutando comando: /%command%"
+  delayed-action: "Acción %action% del horario %schedule% programada con delay de %delay% segundos."
+  delayed-command: "Comando programado con delay de %delay% segundos: /%command%"
+  command-error: "Error ejecutando el comando /%command%. Revisa el stacktrace."
+  history-save-error: "No se pudo guardar el historial de ejecuciones."
+  history-load-error: "No se pudo cargar el historial de ejecuciones."
+  file-created: "Archivo creado: %file%."
+  file-create-error: "No se pudo crear el archivo: %file%."

@@ -1,0 +1,45 @@
+name: CommandDelay
+version: '${version}'
+main: dev.keraune.commanddelay.CommandDelay
+api-version: '1.21'
+load: POSTWORLD
+author: Keraune
+description: Ejecuta comandos automáticos en horarios fijos.
+softdepend: ["PlaceholderAPI"]
+
+commands:
+  commanddelay:
+    description: Comando principal de CommandDelay.
+    usage: /commanddelay <help|reload|list|info|run|next>
+    aliases: [cdelay, cmdelay]
+    permission: commanddelay.use
+
+permissions:
+  commanddelay.use:
+    description: Permite usar el comando principal de CommandDelay.
+    default: op
+  commanddelay.admin:
+    description: Permite administrar todas las funciones de CommandDelay.
+    default: op
+    children:
+      commanddelay.use: true
+      commanddelay.reload: true
+      commanddelay.list: true
+      commanddelay.info: true
+      commanddelay.run: true
+      commanddelay.next: true
+  commanddelay.reload:
+    description: Permite recargar la configuración del plugin.
+    default: op
+  commanddelay.list:
+    description: Permite listar horarios configurados.
+    default: op
+  commanddelay.info:
+    description: Permite ver información detallada de un horario.
+    default: op
+  commanddelay.run:
+    description: Permite ejecutar manualmente un horario.
+    default: op
+  commanddelay.next:
+    description: Permite ver próximas ejecuciones.
+    default: op
