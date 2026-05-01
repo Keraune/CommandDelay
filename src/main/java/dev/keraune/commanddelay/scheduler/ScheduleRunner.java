@@ -525,6 +525,11 @@ public final class ScheduleRunner {
         Map<String, String> placeholders = new LinkedHashMap<>();
         placeholders.put("%schedule%", schedule.id());
         placeholders.put("%event_id%", schedule.id());
+        placeholders.put("%schedule_display_name%", TextFormatter.legacy(schedule.displayName()));
+        placeholders.put("%schedule_name%", TextFormatter.legacy(schedule.displayName()));
+        placeholders.put("%event_name%", TextFormatter.legacy(schedule.displayName()));
+        placeholders.put("%schedule_plain_name%", TextFormatter.plain(schedule.displayName()));
+        placeholders.put("%schedule_raw_name%", schedule.displayName());
         placeholders.put("%online%", String.valueOf(Bukkit.getOnlinePlayers().size()));
         placeholders.put("%targets%", String.valueOf(targetCount));
         placeholders.put("%min_players%", String.valueOf(schedule.requirements().minPlayersOnline()));

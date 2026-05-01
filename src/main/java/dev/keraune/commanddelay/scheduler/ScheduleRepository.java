@@ -6,8 +6,10 @@ import dev.keraune.commanddelay.model.ActionType;
 import dev.keraune.commanddelay.model.ScheduleDefinition;
 import dev.keraune.commanddelay.model.ScheduleRequirements;
 import dev.keraune.commanddelay.model.ScheduledAction;
+import dev.keraune.commanddelay.util.TextFormatter;
 import org.bukkit.configuration.ConfigurationSection;
 
+import java.text.Normalizer;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -81,7 +83,25 @@ public final class ScheduleRepository {
     }
 
     public Optional<ScheduleDefinition> find(String id) {
-        return Optional.ofNullable(schedules.get(id));
+        if (id == null || id.isBlank()) {
+            return Optional.empty();
+        }
+
+        Optional<ScheduleDefinition> exact = Optional.ofNullable(schedules.get(id));
+
+        if (exact.isPresent()) {
+            return exact;
+        }
+
+        String normalizedInput = id.trim().toLowerCase(Locale.ROOT);
+        String safeInput = placeholderKey(id);
+
+        return cachedSchedules.stream()
+                .filter(schedule -> schedule.id().equalsIgnoreCase(id)
+                        || schedule.id().toLowerCase(Locale.ROOT).equals(normalizedInput)
+                        || placeholderKey(schedule.id()).equals(safeInput)
+                        || placeholderKey(schedule.displayName()).equals(safeInput))
+                .findFirst();
     }
 
     public Collection<ScheduleDefinition> all() {
@@ -97,6 +117,7 @@ public final class ScheduleRepository {
 
         DayConfig dayConfig = parseDays(section.getStringList("days"));
         List<LocalTime> times = parseTimes(scheduleId, section.getStringList("times"));
+        String displayName = parseDisplayName(scheduleId, section);
         ScheduleRequirements requirements = parseRequirements(section.getConfigurationSection("requirements"));
         List<ScheduledAction> actions = parseConfiguredActions(scheduleId, section);
 
@@ -118,6 +139,7 @@ public final class ScheduleRepository {
 
         return Optional.of(new ScheduleDefinition(
                 scheduleId,
+                displayName,
                 enabled,
                 dayConfig.everyDay(),
                 dayConfig.days(),
@@ -127,6 +149,34 @@ public final class ScheduleRepository {
                 dayConfig.displayDays(),
                 times.stream().map(TIME_FORMATTER::format).toList()
         ));
+    }
+
+    /**
+     * Lee el nombre visual del horario.
+     *
+     * <p>Se aceptan ambos formatos para mayor comodidad en YAML:</p>
+     * <ul>
+     *     <li>display-name</li>
+     *     <li>display_name</li>
+     * </ul>
+     *
+     * <p>Si no existe ninguno, se usa el ID como fallback. Esto mantiene compatibilidad
+     * con configuraciones antiguas e incluso con IDs que ya tenían formato de color.</p>
+     */
+    private String parseDisplayName(String scheduleId, ConfigurationSection section) {
+        String kebabCase = section.getString("display-name");
+
+        if (kebabCase != null && !kebabCase.isBlank()) {
+            return kebabCase;
+        }
+
+        String snakeCase = section.getString("display_name");
+
+        if (snakeCase != null && !snakeCase.isBlank()) {
+            return snakeCase;
+        }
+
+        return scheduleId;
     }
 
     private DayConfig parseDays(List<String> rawDays) {
@@ -458,6 +508,26 @@ public final class ScheduleRepository {
             case "DOMINGO", "SUNDAY" -> DayOfWeek.SUNDAY;
             default -> null;
         };
+    }
+
+    /**
+     * Convierte un ID o display-name a una llave sencilla para comandos y placeholders.
+     *
+     * <p>Ejemplo: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
+     */
+    private String placeholderKey(String input) {
+        if (input == null || input.isBlank()) {
+            return "";
+        }
+
+        String plain = TextFormatter.plain(input);
+        String withoutAccents = Normalizer.normalize(plain, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return withoutAccents
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
     }
 
     private String normalize(String value) {

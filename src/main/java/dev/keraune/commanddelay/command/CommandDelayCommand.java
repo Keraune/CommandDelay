@@ -11,6 +11,8 @@ import org.bukkit.command.TabCompleter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import dev.keraune.commanddelay.util.TextFormatter;
+
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -123,6 +125,7 @@ public final class CommandDelayCommand implements CommandExecutor, TabCompleter 
                     sender,
                     "commands.list-entry",
                     "%schedule%", schedule.id(),
+                    "%schedule_display_name%", TextFormatter.legacy(schedule.displayName()),
                     "%enabled%", enabledText(schedule),
                     "%days%", String.join(", ", schedule.displayDays()),
                     "%times%", String.join(", ", schedule.displayTimes()),
@@ -155,6 +158,7 @@ public final class CommandDelayCommand implements CommandExecutor, TabCompleter 
                 sender,
                 "commands.info",
                 "%schedule%", schedule.id(),
+                "%schedule_display_name%", TextFormatter.legacy(schedule.displayName()),
                 "%enabled%", enabledText(schedule),
                 "%days%", String.join(", ", schedule.displayDays()),
                 "%times%", String.join(", ", schedule.displayTimes()),
@@ -182,7 +186,12 @@ public final class CommandDelayCommand implements CommandExecutor, TabCompleter 
         }
 
         plugin.scheduleRunner().runNow(optionalSchedule.get());
-        messages().send(sender, "commands.run-started", "%schedule%", scheduleId);
+        messages().send(
+                sender,
+                "commands.run-started",
+                "%schedule%", optionalSchedule.get().id(),
+                "%schedule_display_name%", TextFormatter.legacy(optionalSchedule.get().displayName())
+        );
     }
 
     private void next(CommandSender sender) {
@@ -210,6 +219,7 @@ public final class CommandDelayCommand implements CommandExecutor, TabCompleter 
                     sender,
                     "commands.next-entry",
                     "%schedule%", nextSchedule.schedule().id(),
+                    "%schedule_display_name%", TextFormatter.legacy(nextSchedule.schedule().displayName()),
                     "%next%", formatDateTime(nextSchedule.dateTime().get())
             );
         }

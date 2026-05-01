@@ -64,11 +64,16 @@ settings:
 # - SOUND
 #
 # Placeholders internos disponibles en acciones:
-# %schedule%, %event_id%, %online%, %targets%, %min_players%, %player%, %world%, %x%, %y%, %z%
+# %schedule%, %event_id%, %schedule_display_name%, %schedule_name%, %event_name%,
+# %schedule_plain_name%, %schedule_raw_name%, %online%, %targets%, %min_players%,
+# %player%, %world%, %x%, %y%, %z%
 #
 # Placeholders externos para PlaceholderAPI:
 # Globales:
 # %commanddelay_next_schedule%
+# %commanddelay_next_schedule_display%
+# %commanddelay_next_schedule_name%
+# %commanddelay_next_schedule_plain_name%
 # %commanddelay_next_action%
 # %commanddelay_next_status%
 # %commanddelay_next_remaining%
@@ -87,15 +92,23 @@ settings:
 # %commanddelay_remaining_seconds_<id>%
 # %commanddelay_next_action_<id>%
 # %commanddelay_status_<id>%
+# %commanddelay_name_<id>%
+# %commanddelay_display_name_<id>%
+# %commanddelay_plain_name_<id>%
 #
 # También soporta el estilo:
 # %commanddelay_<id>_remaining%
 # %commanddelay_<id>_remaining_clock%
 # %commanddelay_<id>_next_action%
+# %commanddelay_<id>_name%
+#
+# display-name/display_name permite mostrar nombres con formato en placeholders y mensajes.
+# El ID del schedule debe mantenerse simple cuando sea posible.
 
 schedules:
   boss_dragon_infernal:
     enabled: false
+    display-name: "&#FF3300&lDragón Infernal"
     days:
       - "TODOS"
     times:
@@ -109,7 +122,7 @@ schedules:
         delay-seconds: 0
         messages:
           - ""
-          - "<dark_gray>[<gradient:#FFAA00:#FF3300><bold>Boss</bold></gradient><dark_gray>] <yellow>El boss <red><bold>Dragón Infernal</bold></red> aparecerá en <white>5 minutos</white>."
+          - "<dark_gray>[<gradient:#FFAA00:#FF3300><bold>Boss</bold></gradient><dark_gray>] <yellow>El boss %schedule_display_name% <yellow>aparecerá en <white>5 minutos</white>."
           - "<gray>Jugadores conectados: <green>%online%</green>. Prepárate, <aqua>%player%</aqua>."
           - ""
 

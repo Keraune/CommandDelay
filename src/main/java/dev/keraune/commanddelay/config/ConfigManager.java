@@ -36,7 +36,7 @@ public final class ConfigManager {
         String timezone = config.getString("settings.timezone", "America/Lima");
         ZoneId zoneId = loadZoneId(timezone);
 
-        int checkIntervalSeconds = Math.max(5, config.getInt("settings.check-interval-seconds", 20));
+        int checkIntervalSeconds = Math.max(1, config.getInt("settings.check-interval-seconds", 20));
         boolean removeLeadingSlash = config.getBoolean("settings.remove-leading-slash", true);
         boolean translateCommandColors = config.getBoolean("settings.translate-command-colors", true);
         boolean useMiniMessage = config.getBoolean("settings.use-minimessage", true);

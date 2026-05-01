@@ -5,18 +5,22 @@ import dev.keraune.commanddelay.config.MessageService;
 import dev.keraune.commanddelay.config.PluginSettings;
 import dev.keraune.commanddelay.model.NextActionSnapshot;
 import dev.keraune.commanddelay.model.ScheduleDefinition;
+import dev.keraune.commanddelay.util.TextFormatter;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.text.Normalizer;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -105,6 +109,9 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
 
         return switch (params) {
             case "next_schedule" -> globalSnapshot().map(NextActionSnapshot::scheduleId).orElse(unavailable());
+            case "next_schedule_display", "next_schedule_display_name", "next_schedule_name", "next_display_name", "next_name" -> globalScheduleName("legacy");
+            case "next_schedule_raw_name", "next_schedule_name_raw", "next_raw_name" -> globalScheduleName("raw");
+            case "next_schedule_plain_name", "next_schedule_name_plain", "next_plain_name" -> globalScheduleName("plain");
             case "next_action" -> globalSnapshot().map(snapshot -> snapshot.actionType().name()).orElse(unavailable());
             case "next_status" -> globalStatus();
             case "next_remaining", "next_remaining_short" -> globalRemaining("short");
@@ -144,6 +151,7 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
      * %commanddelay_remaining_boss_dragon%
      * %commanddelay_next_action_boss_dragon%
      * %commanddelay_status_boss_dragon%
+     * %commanddelay_name_boss_dragon%
      */
     private Optional<ScheduleSpecificPlaceholder> parseLegacySchedulePlaceholder(String params) {
         String[][] prefixes = {
@@ -162,7 +170,13 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
                 {"next_time_", "next_time"},
                 {"next_date_", "next_date"},
                 {"next_datetime_", "next_datetime"},
-                {"status_", "status"}
+                {"status_", "status"},
+                {"display_name_", "display_name"},
+                {"name_raw_", "name_raw"},
+                {"raw_name_", "name_raw"},
+                {"name_plain_", "name_plain"},
+                {"plain_name_", "name_plain"},
+                {"name_", "display_name"}
         };
 
         for (String[] entry : prefixes) {
@@ -190,28 +204,27 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
      * %commanddelay_boss_dragon_remaining%
      * %commanddelay_boss_dragon_remaining_clock%
      * %commanddelay_boss_dragon_next_action%
+     * %commanddelay_boss_dragon_name%
      */
     private Optional<ScheduleSpecificPlaceholder> parseModernSchedulePlaceholder(String params) {
         return plugin.scheduleRepository().all().stream()
-                .map(ScheduleDefinition::id)
-                .sorted(Comparator.comparingInt(String::length).reversed())
-                .filter(scheduleId -> {
-                    String normalizedId = scheduleId.toLowerCase(Locale.ROOT);
-                    return params.equals(normalizedId) || params.startsWith(normalizedId + "_");
-                })
+                .flatMap(schedule -> lookupKeys(schedule).stream().map(key -> new ScheduleLookup(schedule, key)))
+                .sorted(Comparator.comparingInt((ScheduleLookup lookup) -> lookup.key().length()).reversed())
+                .filter(lookup -> params.equals(lookup.key()) || params.startsWith(lookup.key() + "_"))
                 .findFirst()
-                .flatMap(scheduleId -> {
-                    String normalizedId = scheduleId.toLowerCase(Locale.ROOT);
+                .flatMap(lookup -> {
+                    ScheduleDefinition schedule = lookup.schedule();
+                    String key = lookup.key();
 
-                    if (params.equals(normalizedId)) {
-                        return Optional.of(new ScheduleSpecificPlaceholder(scheduleId, "remaining_short"));
+                    if (params.equals(key)) {
+                        return Optional.of(new ScheduleSpecificPlaceholder(schedule.id(), "remaining_short"));
                     }
 
-                    String suffix = params.substring(normalizedId.length() + 1);
+                    String suffix = params.substring(key.length() + 1);
                     String type = normalizeType(suffix);
                     return type.isBlank()
                             ? Optional.empty()
-                            : Optional.of(new ScheduleSpecificPlaceholder(scheduleId, type));
+                            : Optional.of(new ScheduleSpecificPlaceholder(schedule.id(), type));
                 });
     }
 
@@ -223,6 +236,14 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
         }
 
         ScheduleDefinition schedule = optionalSchedule.get();
+
+        if (placeholder.type().equals("id")) {
+            return schedule.id();
+        }
+
+        if (isNameType(placeholder.type())) {
+            return scheduleName(schedule, placeholder.type());
+        }
 
         if (!schedule.enabled()) {
             return placeholder.type().equals("status") ? status("disabled") : unavailable();
@@ -267,6 +288,17 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
                 .orElse(unavailable());
     }
 
+    private String globalScheduleName(String format) {
+        return globalSnapshot()
+                .flatMap(snapshot -> findSchedule(snapshot.scheduleId()))
+                .map(schedule -> switch (format) {
+                    case "raw" -> schedule.displayName();
+                    case "plain" -> TextFormatter.plain(schedule.displayName());
+                    default -> TextFormatter.legacy(schedule.displayName());
+                })
+                .orElse(unavailable());
+    }
+
     private String globalStatus() {
         return globalSnapshot()
                 .map(snapshot -> snapshot.active() ? status("running") : status("waiting"))
@@ -306,11 +338,25 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             case "next_date" -> "next_date";
             case "next_datetime" -> "next_datetime";
             case "status" -> "status";
+            case "id", "schedule" -> "id";
+            case "name", "display", "display_name", "schedule_name", "schedule_display", "schedule_display_name" -> "display_name";
+            case "name_raw", "raw_name", "display_name_raw", "display_raw" -> "name_raw";
+            case "name_plain", "plain_name", "display_name_plain", "display_plain" -> "name_plain";
             default -> "";
         };
     }
 
+    private boolean isNameType(String type) {
+        return type.equals("display_name") || type.equals("name_raw") || type.equals("name_plain");
+    }
 
+    private String scheduleName(ScheduleDefinition schedule, String type) {
+        return switch (type) {
+            case "name_raw" -> schedule.displayName();
+            case "name_plain" -> TextFormatter.plain(schedule.displayName());
+            default -> TextFormatter.legacy(schedule.displayName());
+        };
+    }
 
     private Optional<ScheduleDefinition> findSchedule(String scheduleId) {
         Optional<ScheduleDefinition> exact = plugin.scheduleRepository().find(scheduleId);
@@ -319,9 +365,49 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             return exact;
         }
 
+        String normalizedInput = normalize(scheduleId);
+        String safeInput = placeholderKey(scheduleId);
+
         return plugin.scheduleRepository().all().stream()
-                .filter(schedule -> schedule.id().equalsIgnoreCase(scheduleId))
+                .filter(schedule -> schedule.id().equalsIgnoreCase(scheduleId)
+                        || normalize(schedule.id()).equals(normalizedInput)
+                        || lookupKeys(schedule).contains(safeInput)
+                        || lookupKeys(schedule).contains(normalizedInput))
                 .findFirst();
+    }
+
+    private Set<String> lookupKeys(ScheduleDefinition schedule) {
+        Set<String> keys = new LinkedHashSet<>();
+        addLookupKey(keys, normalize(schedule.id()));
+        addLookupKey(keys, placeholderKey(schedule.id()));
+        addLookupKey(keys, placeholderKey(schedule.displayName()));
+        return keys;
+    }
+
+    private void addLookupKey(Set<String> keys, String key) {
+        if (key != null && !key.isBlank()) {
+            keys.add(key);
+        }
+    }
+
+    /**
+     * Convierte un texto con colores o espacios en una llave segura para PlaceholderAPI.
+     *
+     * <p>Ejemplo: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
+     */
+    private String placeholderKey(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+
+        String plain = TextFormatter.plain(text);
+        String withoutAccents = Normalizer.normalize(plain, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return withoutAccents
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
     }
 
     private ZonedDateTime now() {
@@ -353,6 +439,9 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
     }
 
     private record ScheduleSpecificPlaceholder(String scheduleId, String type) {
+    }
+
+    private record ScheduleLookup(ScheduleDefinition schedule, String key) {
     }
 
     private record CachedValue(String value, long createdAt) {

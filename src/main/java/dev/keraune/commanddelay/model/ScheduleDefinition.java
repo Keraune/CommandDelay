@@ -19,6 +19,7 @@ import java.util.Set;
 public final class ScheduleDefinition {
 
     private final String id;
+    private final String displayName;
     private final boolean enabled;
     private final boolean everyDay;
     private final Set<DayOfWeek> days;
@@ -30,6 +31,7 @@ public final class ScheduleDefinition {
 
     public ScheduleDefinition(
             String id,
+            String displayName,
             boolean enabled,
             boolean everyDay,
             Set<DayOfWeek> days,
@@ -40,6 +42,7 @@ public final class ScheduleDefinition {
             List<String> displayTimes
     ) {
         this.id = id;
+        this.displayName = displayName == null || displayName.isBlank() ? id : displayName;
         this.enabled = enabled;
         this.everyDay = everyDay;
         this.days = Set.copyOf(days);
@@ -52,6 +55,16 @@ public final class ScheduleDefinition {
 
     public String id() {
         return id;
+    }
+
+    /**
+     * Nombre visual configurable del horario.
+     *
+     * <p>Puede contener formatos de color como &, hex y MiniMessage. El ID sigue
+     * siendo el identificador técnico usado para configuración y comandos.</p>
+     */
+    public String displayName() {
+        return displayName;
     }
 
     public boolean enabled() {
