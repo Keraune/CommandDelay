@@ -13,10 +13,12 @@ import org.jetbrains.annotations.Nullable;
 
 import java.text.Normalizer;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -40,6 +42,9 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter STATIC_TIME_24_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter STATIC_TIME_24_AMPM_FORMAT = DateTimeFormatter.ofPattern("HH:mm a", Locale.US);
+    private static final DateTimeFormatter STATIC_TIME_12_FORMAT = DateTimeFormatter.ofPattern("h:mm a", Locale.US);
 
     private final CommandDelay plugin;
 
@@ -125,6 +130,12 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             case "next_time" -> globalSnapshot().map(snapshot -> snapshot.dueAt().format(TIME_FORMAT)).orElse(unavailable());
             case "next_date" -> globalSnapshot().map(snapshot -> snapshot.dueAt().format(DATE_FORMAT)).orElse(unavailable());
             case "next_datetime" -> globalSnapshot().map(snapshot -> snapshot.dueAt().format(DATE_TIME_FORMAT)).orElse(unavailable());
+            case "next_schedule_time", "next_schedule_time_24", "next_static_time", "next_static_time_24" -> globalScheduleTime("time_24");
+            case "next_schedule_time_24_ampm", "next_static_time_24_ampm" -> globalScheduleTime("time_24_ampm");
+            case "next_schedule_time_12", "next_static_time_12" -> globalScheduleTime("time_12");
+            case "next_schedule_times", "next_schedule_times_24", "next_static_times", "next_static_times_24" -> globalScheduleTime("times_24");
+            case "next_schedule_times_24_ampm", "next_static_times_24_ampm" -> globalScheduleTime("times_24_ampm");
+            case "next_schedule_times_12", "next_static_times_12" -> globalScheduleTime("times_12");
             case "total_schedules" -> String.valueOf(plugin.scheduleRepository().size());
             default -> resolveSchedulePlaceholder(params);
         };
@@ -155,6 +166,14 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
      */
     private Optional<ScheduleSpecificPlaceholder> parseLegacySchedulePlaceholder(String params) {
         String[][] prefixes = {
+                {"times_24_ampm_", "times_24_ampm"},
+                {"time_24_ampm_", "time_24_ampm"},
+                {"times_12_", "times_12"},
+                {"time_12_", "time_12"},
+                {"times_24_", "times_24"},
+                {"time_24_", "time_24"},
+                {"times_", "times_24"},
+                {"time_", "time_24"},
                 {"remaining_seconds_", "remaining_seconds"},
                 {"remaining_minutes_", "remaining_minutes"},
                 {"remaining_hours_", "remaining_hours"},
@@ -245,6 +264,10 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             return scheduleName(schedule, placeholder.type());
         }
 
+        if (isStaticTimeType(placeholder.type())) {
+            return scheduleTime(schedule, placeholder.type());
+        }
+
         if (!schedule.enabled()) {
             return placeholder.type().equals("status") ? status("disabled") : unavailable();
         }
@@ -299,6 +322,13 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
                 .orElse(unavailable());
     }
 
+    private String globalScheduleTime(String type) {
+        return globalSnapshot()
+                .flatMap(snapshot -> findSchedule(snapshot.scheduleId()))
+                .map(schedule -> scheduleTime(schedule, type))
+                .orElse(unavailable());
+    }
+
     private String globalStatus() {
         return globalSnapshot()
                 .map(snapshot -> snapshot.active() ? status("running") : status("waiting"))
@@ -333,6 +363,12 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             case "remaining_seconds" -> "remaining_seconds";
             case "remaining_minutes" -> "remaining_minutes";
             case "remaining_hours" -> "remaining_hours";
+            case "time", "time_24", "schedule_time", "schedule_time_24", "static_time", "static_time_24" -> "time_24";
+            case "time_24_ampm", "schedule_time_24_ampm", "static_time_24_ampm" -> "time_24_ampm";
+            case "time_12", "time_ampm", "schedule_time_12", "static_time_12" -> "time_12";
+            case "times", "times_24", "schedule_times", "schedule_times_24", "static_times", "static_times_24" -> "times_24";
+            case "times_24_ampm", "schedule_times_24_ampm", "static_times_24_ampm" -> "times_24_ampm";
+            case "times_12", "times_ampm", "schedule_times_12", "static_times_12" -> "times_12";
             case "next_action" -> "next_action";
             case "next_time" -> "next_time";
             case "next_date" -> "next_date";
@@ -358,6 +394,42 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
         };
     }
 
+    private boolean isStaticTimeType(String type) {
+        return type.equals("time_24")
+                || type.equals("time_24_ampm")
+                || type.equals("time_12")
+                || type.equals("times_24")
+                || type.equals("times_24_ampm")
+                || type.equals("times_12");
+    }
+
+    private String scheduleTime(ScheduleDefinition schedule, String type) {
+        List<LocalTime> times = schedule.times();
+
+        if (times.isEmpty()) {
+            return unavailable();
+        }
+
+        boolean multiple = type.startsWith("times_");
+
+        if (!multiple) {
+            return formatStaticTime(times.getFirst(), type);
+        }
+
+        List<String> formattedTimes = times.stream()
+                .map(time -> formatStaticTime(time, type))
+                .toList();
+        return String.join(", ", formattedTimes);
+    }
+
+    private String formatStaticTime(LocalTime time, String type) {
+        return switch (type) {
+            case "time_12", "times_12" -> time.format(STATIC_TIME_12_FORMAT);
+            case "time_24_ampm", "times_24_ampm" -> time.format(STATIC_TIME_24_AMPM_FORMAT);
+            default -> time.format(STATIC_TIME_24_FORMAT);
+        };
+    }
+
     private Optional<ScheduleDefinition> findSchedule(String scheduleId) {
         Optional<ScheduleDefinition> exact = plugin.scheduleRepository().find(scheduleId);
 
@@ -365,35 +437,67 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
             return exact;
         }
 
-        String normalizedInput = normalize(scheduleId);
-        String safeInput = placeholderKey(scheduleId);
+        Set<String> inputKeys = lookupVariants(scheduleId);
 
         return plugin.scheduleRepository().all().stream()
-                .filter(schedule -> schedule.id().equalsIgnoreCase(scheduleId)
-                        || normalize(schedule.id()).equals(normalizedInput)
-                        || lookupKeys(schedule).contains(safeInput)
-                        || lookupKeys(schedule).contains(normalizedInput))
+                .filter(schedule -> lookupKeys(schedule).stream().anyMatch(inputKeys::contains))
                 .findFirst();
     }
 
     private Set<String> lookupKeys(ScheduleDefinition schedule) {
         Set<String> keys = new LinkedHashSet<>();
-        addLookupKey(keys, normalize(schedule.id()));
-        addLookupKey(keys, placeholderKey(schedule.id()));
-        addLookupKey(keys, placeholderKey(schedule.displayName()));
+        keys.addAll(lookupVariants(schedule.id()));
+        keys.addAll(lookupVariants(schedule.displayName()));
+        return keys;
+    }
+
+    /**
+     * Builds tolerant keys for PlaceholderAPI lookups.
+     *
+     * <p>This intentionally accepts common server-owner variants such as
+     * {@code Boss_Dragon}, {@code boss-dragon}, {@code dragon} and a colored
+     * display name like {@code <#ff0000>&lDragon}.</p>
+     */
+    private Set<String> lookupVariants(String value) {
+        Set<String> keys = new LinkedHashSet<>();
+
+        if (value == null || value.isBlank()) {
+            return keys;
+        }
+
+        addLookupKey(keys, normalize(value).replace('-', '_').replace(' ', '_'));
+        addLookupKey(keys, placeholderKey(value));
+
+        List<String> snapshot = List.copyOf(keys);
+        for (String key : snapshot) {
+            addLookupKey(keys, compactKey(key));
+
+            if (key.startsWith("boss_")) {
+                addLookupKey(keys, key.substring("boss_".length()));
+                addLookupKey(keys, compactKey(key.substring("boss_".length())));
+            } else if (!key.isBlank()) {
+                addLookupKey(keys, "boss_" + key);
+                addLookupKey(keys, "boss" + compactKey(key));
+            }
+        }
+
         return keys;
     }
 
     private void addLookupKey(Set<String> keys, String key) {
         if (key != null && !key.isBlank()) {
-            keys.add(key);
+            keys.add(key.toLowerCase(Locale.ROOT));
         }
     }
 
+    private String compactKey(String text) {
+        return placeholderKey(text).replace("_", "");
+    }
+
     /**
-     * Convierte un texto con colores o espacios en una llave segura para PlaceholderAPI.
+     * Converts a colored or spaced text into a PlaceholderAPI-safe lookup key.
      *
-     * <p>Ejemplo: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
+     * <p>Example: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
      */
     private String placeholderKey(String text) {
         if (text == null || text.isBlank()) {
@@ -416,7 +520,16 @@ public final class CommandDelayExpansion extends PlaceholderExpansion {
     }
 
     private String normalize(String params) {
-        return params == null ? "" : params.trim().toLowerCase(Locale.ROOT);
+        if (params == null) {
+            return "";
+        }
+
+        return params.trim()
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_')
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
     }
 
     private String unavailable() {

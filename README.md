@@ -17,6 +17,7 @@ El objetivo principal del plugin es servir como un sistema externo y configurabl
   - Title
   - Actionbar
   - Sound
+  - Bossbar
   - Command
 - Soporte para PlaceholderAPI.
 - Soporte para formatos de colores:
@@ -167,6 +168,8 @@ timezone: "America/Argentina/Buenos_Aires"
 schedules:
   boss_dragon_infernal:
     enabled: true
+    display-name: "&#FF3300&lDragón Infernal"
+    action-delay-mode: "SEQUENTIAL"
     days:
       - "TODOS"
     times:
@@ -182,7 +185,7 @@ schedules:
         delay-seconds: 0
         messages:
           - ""
-          - "<dark_gray>[<gradient:#FFAA00:#FF3300><bold>Boss</bold></gradient><dark_gray>] <yellow>El boss <red><bold>Dragón Infernal</bold></red> aparecerá en <white>5 minutos</white>."
+          - "<dark_gray>[<gradient:#FFAA00:#FF3300><bold>Boss</bold></gradient><dark_gray>] <yellow>El boss %schedule_display_name% <yellow>aparecerá en <white>5 minutos</white>."
           - "<gray>Prepárate para el combate."
           - ""
 
@@ -192,26 +195,87 @@ schedules:
         subtitle: "<yellow>Dragón Infernal aparecerá en 1 minuto"
 
       - type: "ACTIONBAR"
-        delay-seconds: 270
+        delay-seconds: 30
         message: "<gold>El boss aparecerá en <red>30 segundos</red>..."
 
+      - type: "BOSSBAR"
+        delay-seconds: 0
+        message: "<gradient:#FFAA00:#FF3300><bold>%schedule_plain_name%</bold></gradient> <yellow>aparece a las <white>%schedule_time_12%</white>"
+        color: "PURPLE"
+        overlay: "NOTCHED_10"
+        progress: 1.0
+        duration-seconds: 25
+        decrease-progress: true
+        flags: []
+
       - type: "SOUND"
-        delay-seconds: 295
+        delay-seconds: 25
         sound: "entity.ender_dragon.growl"
         volume: 1.0
         pitch: 1.0
 
       - type: "COMMAND"
-        delay-seconds: 300
+        delay-seconds: 5
         command: "mm mobs spawn DragonInfernal 1 world,100,70,100"
 
       - type: "CHAT"
-        delay-seconds: 300
+        delay-seconds: 0
         messages:
           - ""
           - "<dark_gray>[<red><bold>Boss</bold></red><dark_gray>] <red>¡El Dragón Infernal ha aparecido!"
           - ""
 ```
+
+---
+
+## Modo de delay de acciones
+
+Cada schedule puede decidir cómo interpretar `delay-seconds` usando `action-delay-mode`.
+
+### ABSOLUTE
+
+Es el modo clásico y se mantiene como comportamiento por defecto. Cada `delay-seconds` se cuenta desde el inicio del schedule.
+
+```yml
+schedules:
+  boss_absolute:
+    action-delay-mode: "ABSOLUTE"
+    actions:
+      - type: "CHAT"
+        delay-seconds: 0
+      - type: "TITLE"
+        delay-seconds: 240
+      - type: "COMMAND"
+        delay-seconds: 300
+```
+
+### SEQUENTIAL
+
+Ejecuta las acciones una por una. Cada `delay-seconds` se cuenta desde la acción anterior, por lo que ya no necesitas sumar manualmente los segundos acumulados.
+
+```yml
+schedules:
+  boss_sequential:
+    action-delay-mode: "SEQUENTIAL"
+    actions:
+      - type: "BOSSBAR"
+        delay-seconds: 0
+        duration-seconds: 60
+        message: "<red>Boss en camino</red>"
+        color: "RED"
+        overlay: "PROGRESS"
+
+      - type: "COMMAND"
+        delay-seconds: 60
+        command: "mm mobs spawn DragonInfernal 1 world,100,70,100"
+
+      - type: "CHAT"
+        delay-seconds: 0
+        messages:
+          - "<red>¡El boss apareció!"
+```
+
+También se aceptan alias para el modo secuencial: `SEQUENTIAL`, `CHAINED`, `RELATIVE`, `ONE_BY_ONE`.
 
 ---
 
@@ -290,6 +354,71 @@ Reproduce un sonido a los jugadores objetivo.
   sound: "entity.ender_dragon.growl"
   volume: 1.0
   pitch: 1.0
+```
+
+---
+
+### BOSSBAR
+
+Muestra una bossbar temporal a los jugadores objetivo. El texto soporta los mismos formatos de color que chat, title y actionbar: legacy, hex, tags simples, gradientes, MiniMessage básico y PlaceholderAPI.
+
+```yml
+- type: "BOSSBAR"
+  delay-seconds: 0
+  message: "<gradient:#FFAA00:#FF3300><bold>Boss próximo</bold></gradient> <yellow>Aparece a las <white>%schedule_time_12%</white>"
+  color: "PURPLE"
+  overlay: "NOTCHED_10"
+  progress: 1.0
+  duration-seconds: 60
+  decrease-progress: true
+  flags:
+    - "DARKEN_SCREEN"
+```
+
+Colores soportados:
+
+```txt
+PINK, BLUE, RED, GREEN, YELLOW, PURPLE, WHITE
+```
+
+Formatos/overlays soportados:
+
+```txt
+PROGRESS / SOLID
+NOTCHED_6 / SEGMENTED_6
+NOTCHED_10 / SEGMENTED_10
+NOTCHED_12 / SEGMENTED_12
+NOTCHED_20 / SEGMENTED_20
+```
+
+`progress` acepta valores de `0.0` a `1.0`. También puedes usar porcentajes de `0` a `100`.
+
+`duration-seconds` define cuántos segundos permanece visible. También puedes usar `duration-ticks`, `stay-ticks` o `stayTicks`.
+
+`decrease-progress` está activado por defecto. Cuando está en `true`, la barra baja visualmente desde el `progress` inicial hasta `0` durante la duración configurada.
+
+Flags soportadas:
+
+```txt
+DARKEN_SCREEN
+PLAY_BOSS_MUSIC
+CREATE_WORLD_FOG
+```
+
+Puedes escribirlas como lista:
+
+```yml
+flags:
+  - "DARKEN_SCREEN"
+  - "PLAY_BOSS_MUSIC"
+```
+
+O como booleanos:
+
+```yml
+darken-screen: true
+play-boss-music: true
+create-world-fog: false
 ```
 
 ---
@@ -406,6 +535,13 @@ Algunos ejemplos:
 
 ```txt
 %schedule%
+%schedule_display_name%
+%schedule_time_24%
+%schedule_time_24_ampm%
+%schedule_time_12%
+%schedule_times_24%
+%schedule_times_24_ampm%
+%schedule_times_12%
 %online%
 %targets%
 ```
@@ -416,6 +552,73 @@ Ejemplo:
 - type: "COMMAND"
   delay-seconds: 0
   command: "say Hay %online% jugadores conectados."
+```
+
+---
+
+
+### Placeholders de horario estático
+
+Estos placeholders muestran las horas configuradas dentro de `times`, no el contador dinámico hasta la siguiente acción. Son útiles para hologramas, menús, scoreboards o bossbars donde quieras mostrar algo como `18:30`, `18:30 PM` o `8:00 AM`.
+
+Por horario, formato clásico:
+
+```txt
+%commanddelay_time_24_<id>%
+%commanddelay_time_24_ampm_<id>%
+%commanddelay_time_12_<id>%
+%commanddelay_times_24_<id>%
+%commanddelay_times_24_ampm_<id>%
+%commanddelay_times_12_<id>%
+```
+
+Por horario, formato moderno:
+
+```txt
+%commanddelay_<id>_time_24%
+%commanddelay_<id>_time_24_ampm%
+%commanddelay_<id>_time_12%
+%commanddelay_<id>_times_24%
+%commanddelay_<id>_times_24_ampm%
+%commanddelay_<id>_times_12%
+```
+
+Para el próximo horario global:
+
+```txt
+%commanddelay_next_schedule_time_24%
+%commanddelay_next_schedule_time_24_ampm%
+%commanddelay_next_schedule_time_12%
+%commanddelay_next_schedule_times_24%
+%commanddelay_next_schedule_times_24_ampm%
+%commanddelay_next_schedule_times_12%
+```
+
+Ejemplo:
+
+```yml
+times:
+  - "08:00"
+  - "18:30"
+  - "8:00 AM"
+  - "06:30 PM"
+```
+
+El parser también acepta variantes comunes como `8:00`, `8:00 AM`, `06:30 PM` y `18:30 PM`. Internamente las horas se normalizan a `LocalTime`, por eso el formato de salida depende del placeholder usado.
+
+Si un placeholder devuelve `N/A`, ejecuta `/commanddelay list`: si el horario no aparece cargado, normalmente hay una hora inválida o el schedule no tiene acciones/comandos válidos.
+
+Los placeholders por horario son tolerantes con el ID. Por ejemplo, si tu schedule se llama `Boss_Dragon`, puedes usar variantes como `Boss_Dragon`, `boss-dragon`, `boss_dragon` o incluso `Dragon` cuando el `display-name` coincide.
+
+Resultados posibles:
+
+```txt
+time_24: 08:00
+time_24_ampm: 08:00 AM
+time_12: 8:00 AM
+times_24: 08:00, 18:30
+times_24_ampm: 08:00 AM, 18:30 PM
+times_12: 8:00 AM, 6:30 PM
 ```
 
 ---

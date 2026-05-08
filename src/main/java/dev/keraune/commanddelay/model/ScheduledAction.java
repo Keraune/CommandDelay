@@ -3,11 +3,11 @@ package dev.keraune.commanddelay.model;
 import java.util.List;
 
 /**
- * Acción programada dentro de un horario.
+ * Scheduled action inside a configured schedule.
  *
- * <p>Una acción puede ser un comando de consola, un anuncio global en chat,
- * un title, un actionbar o un sonido. Mantenerlo como modelo inmutable facilita
- * validar el YAML una sola vez durante el reload.</p>
+ * <p>An action can dispatch a console command, send chat output, show a title,
+ * send an action bar, play a sound or display a boss bar. Keeping this model
+ * immutable allows YAML validation to happen once during reload.</p>
  */
 public record ScheduledAction(
         ActionType type,
@@ -22,7 +22,8 @@ public record ScheduledAction(
         int fadeOutTicks,
         String sound,
         float volume,
-        float pitch
+        float pitch,
+        BossBarSettings bossBar
 ) {
 
     public static ScheduledAction command(String command, int delaySeconds) {
@@ -39,7 +40,8 @@ public record ScheduledAction(
                 20,
                 "",
                 1.0F,
-                1.0F
+                1.0F,
+                null
         );
     }
 

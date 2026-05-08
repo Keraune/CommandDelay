@@ -4,7 +4,7 @@
 # Plugin para ejecutar acciones programadas en horarios fijos.
 # Pensado para eventos automáticos como bosses de MythicMobs.
 #
-# Formato de hora: HH:mm. Ejemplos: "08:00", "20:30", "23:55".
+# Formatos de hora aceptados: "18:30", "8:00", "8:00 AM", "06:30 PM", "18:30 PM".
 # Los comandos se ejecutan desde consola. Puedes escribirlos con o sin "/".
 #
 # Formatos de texto soportados en anuncios:
@@ -56,16 +56,34 @@ settings:
 # - worlds: limita jugadores objetivo por mundo.
 # - permission: limita jugadores objetivo por permiso.
 #
+# action-delay-mode controla cómo se interpretan los delay-seconds:
+# - ABSOLUTE: modo clásico. Cada delay se cuenta desde el inicio del horario.
+# - SEQUENTIAL: ejecuta acciones una por una. Cada delay se cuenta desde la acción anterior.
+#
 # actions soporta:
 # - COMMAND
 # - CHAT / BROADCAST
 # - TITLE
 # - ACTIONBAR
 # - SOUND
+# - BOSSBAR
+#
+# BOSSBAR soporta:
+# - color: PINK, BLUE, RED, GREEN, YELLOW, PURPLE, WHITE
+# - overlay/style: PROGRESS/SOLID, NOTCHED_6/SEGMENTED_6, NOTCHED_10/SEGMENTED_10,
+#                  NOTCHED_12/SEGMENTED_12, NOTCHED_20/SEGMENTED_20
+# - progress: 0.0 a 1.0, o 0 a 100
+# - duration-seconds o duration-ticks
+# - decrease-progress: true/false. Si está en true, la barra baja hasta 0 durante su duración.
+# - flags: DARKEN_SCREEN, PLAY_BOSS_MUSIC, CREATE_WORLD_FOG
+#   También puedes usar darken-screen, play-boss-music y create-world-fog como booleanos.
 #
 # Placeholders internos disponibles en acciones:
 # %schedule%, %event_id%, %schedule_display_name%, %schedule_name%, %event_name%,
-# %schedule_plain_name%, %schedule_raw_name%, %online%, %targets%, %min_players%,
+# %schedule_plain_name%, %schedule_raw_name%,
+# %schedule_time_24%, %schedule_time_24_ampm%, %schedule_time_12%,
+# %schedule_times_24%, %schedule_times_24_ampm%, %schedule_times_12%,
+# %online%, %targets%, %min_players%,
 # %player%, %world%, %x%, %y%, %z%
 #
 # Placeholders externos para PlaceholderAPI:
@@ -84,6 +102,19 @@ settings:
 # %commanddelay_next_remaining_seconds%
 # %commanddelay_next_time%
 # %commanddelay_next_datetime%
+# %commanddelay_next_schedule_time_24%
+# %commanddelay_next_schedule_time_24_ampm%
+# %commanddelay_next_schedule_time_12%
+# %commanddelay_next_schedule_times_24%
+# %commanddelay_next_schedule_times_24_ampm%
+# %commanddelay_next_schedule_times_12%
+#
+# Notas importantes para PlaceholderAPI:
+# - Si un placeholder devuelve N/A, revisa primero /commanddelay list para confirmar
+#   que el horario fue cargado. Un horario con horas inválidas o sin acciones válidas
+#   no se registra en memoria.
+# - Los IDs son tolerantes: Boss_Dragon, boss-dragon, boss_dragon y Dragon pueden
+#   resolver el mismo horario cuando el ID o display-name coinciden.
 #
 # Por horario:
 # %commanddelay_remaining_<id>%
@@ -92,6 +123,12 @@ settings:
 # %commanddelay_remaining_seconds_<id>%
 # %commanddelay_next_action_<id>%
 # %commanddelay_status_<id>%
+# %commanddelay_time_24_<id>%
+# %commanddelay_time_24_ampm_<id>%
+# %commanddelay_time_12_<id>%
+# %commanddelay_times_24_<id>%
+# %commanddelay_times_24_ampm_<id>%
+# %commanddelay_times_12_<id>%
 # %commanddelay_name_<id>%
 # %commanddelay_display_name_<id>%
 # %commanddelay_plain_name_<id>%
@@ -100,6 +137,12 @@ settings:
 # %commanddelay_<id>_remaining%
 # %commanddelay_<id>_remaining_clock%
 # %commanddelay_<id>_next_action%
+# %commanddelay_<id>_time_24%
+# %commanddelay_<id>_time_24_ampm%
+# %commanddelay_<id>_time_12%
+# %commanddelay_<id>_times_24%
+# %commanddelay_<id>_times_24_ampm%
+# %commanddelay_<id>_times_12%
 # %commanddelay_<id>_name%
 #
 # display-name/display_name permite mostrar nombres con formato en placeholders y mensajes.
@@ -109,6 +152,9 @@ schedules:
   boss_dragon_infernal:
     enabled: false
     display-name: "&#FF3300&lDragón Infernal"
+    # ABSOLUTE mantiene el comportamiento antiguo.
+    # SEQUENTIAL permite escribir delays relativos sin sumar manualmente.
+    action-delay-mode: "SEQUENTIAL"
     days:
       - "TODOS"
     times:
@@ -135,21 +181,31 @@ schedules:
         fade-out-ticks: 20
 
       - type: "ACTIONBAR"
-        delay-seconds: 270
+        delay-seconds: 30
         message: "<gold>El boss aparecerá en <red>30 segundos</red>..."
 
+      - type: "BOSSBAR"
+        delay-seconds: 0
+        message: "<gradient:#FFAA00:#FF3300><bold>%schedule_plain_name%</bold></gradient> <yellow>aparece a las <white>%schedule_time_12%</white>"
+        color: "PURPLE"
+        overlay: "NOTCHED_10"
+        progress: 1.0
+        duration-seconds: 25
+        decrease-progress: true
+        flags: []
+
       - type: "SOUND"
-        delay-seconds: 295
+        delay-seconds: 25
         sound: "entity.ender_dragon.growl"
         volume: 1.0
         pitch: 1.0
 
       - type: "COMMAND"
-        delay-seconds: 300
+        delay-seconds: 5
         command: "mm mobs spawn DragonInfernal 1 world,100,70,100"
 
       - type: "CHAT"
-        delay-seconds: 300
+        delay-seconds: 0
         messages:
           - ""
           - "<dark_gray>[<red><bold>Boss</bold></red><dark_gray>] <red>¡El Dragón Infernal ha aparecido!"

@@ -25,6 +25,7 @@ public final class ScheduleDefinition {
     private final Set<DayOfWeek> days;
     private final List<LocalTime> times;
     private final List<ScheduledAction> actions;
+    private final ActionDelayMode actionDelayMode;
     private final ScheduleRequirements requirements;
     private final List<String> displayDays;
     private final List<String> displayTimes;
@@ -37,6 +38,7 @@ public final class ScheduleDefinition {
             Set<DayOfWeek> days,
             List<LocalTime> times,
             List<ScheduledAction> actions,
+            ActionDelayMode actionDelayMode,
             ScheduleRequirements requirements,
             List<String> displayDays,
             List<String> displayTimes
@@ -48,6 +50,7 @@ public final class ScheduleDefinition {
         this.days = Set.copyOf(days);
         this.times = times.stream().sorted().toList();
         this.actions = List.copyOf(actions);
+        this.actionDelayMode = actionDelayMode == null ? ActionDelayMode.ABSOLUTE : actionDelayMode;
         this.requirements = requirements == null ? ScheduleRequirements.empty() : requirements;
         this.displayDays = List.copyOf(displayDays);
         this.displayTimes = List.copyOf(displayTimes);
@@ -92,6 +95,10 @@ public final class ScheduleDefinition {
      */
     public List<ScheduledAction> commands() {
         return actions;
+    }
+
+    public ActionDelayMode actionDelayMode() {
+        return actionDelayMode;
     }
 
     public ScheduleRequirements requirements() {

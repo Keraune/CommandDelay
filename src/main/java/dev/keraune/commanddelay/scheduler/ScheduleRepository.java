@@ -2,7 +2,9 @@ package dev.keraune.commanddelay.scheduler;
 
 import dev.keraune.commanddelay.CommandDelay;
 import dev.keraune.commanddelay.config.MessageService;
+import dev.keraune.commanddelay.model.ActionDelayMode;
 import dev.keraune.commanddelay.model.ActionType;
+import dev.keraune.commanddelay.model.BossBarSettings;
 import dev.keraune.commanddelay.model.ScheduleDefinition;
 import dev.keraune.commanddelay.model.ScheduleRequirements;
 import dev.keraune.commanddelay.model.ScheduledAction;
@@ -13,7 +15,6 @@ import java.text.Normalizer;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -24,6 +25,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Carga y mantiene en memoria los horarios definidos en config.yml.
@@ -34,6 +37,7 @@ import java.util.Set;
 public final class ScheduleRepository {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
+    private static final Pattern FLEXIBLE_TIME_PATTERN = Pattern.compile("^(\\d{1,2}):(\\d{2})(?:\\s*(AM|PM))?$", Pattern.CASE_INSENSITIVE);
 
     private final CommandDelay plugin;
     private final MessageService messageService;
@@ -93,14 +97,11 @@ public final class ScheduleRepository {
             return exact;
         }
 
-        String normalizedInput = id.trim().toLowerCase(Locale.ROOT);
-        String safeInput = placeholderKey(id);
+        Set<String> inputKeys = lookupVariants(id);
 
         return cachedSchedules.stream()
-                .filter(schedule -> schedule.id().equalsIgnoreCase(id)
-                        || schedule.id().toLowerCase(Locale.ROOT).equals(normalizedInput)
-                        || placeholderKey(schedule.id()).equals(safeInput)
-                        || placeholderKey(schedule.displayName()).equals(safeInput))
+                .filter(schedule -> lookupVariants(schedule.id()).stream().anyMatch(inputKeys::contains)
+                        || lookupVariants(schedule.displayName()).stream().anyMatch(inputKeys::contains))
                 .findFirst();
     }
 
@@ -118,6 +119,7 @@ public final class ScheduleRepository {
         DayConfig dayConfig = parseDays(section.getStringList("days"));
         List<LocalTime> times = parseTimes(scheduleId, section.getStringList("times"));
         String displayName = parseDisplayName(scheduleId, section);
+        ActionDelayMode actionDelayMode = parseActionDelayMode(section);
         ScheduleRequirements requirements = parseRequirements(section.getConfigurationSection("requirements"));
         List<ScheduledAction> actions = parseConfiguredActions(scheduleId, section);
 
@@ -145,10 +147,37 @@ public final class ScheduleRepository {
                 dayConfig.days(),
                 times,
                 actions,
+                actionDelayMode,
                 requirements,
                 dayConfig.displayDays(),
                 times.stream().map(TIME_FORMATTER::format).toList()
         ));
+    }
+
+
+    /**
+     * Reads how delay-seconds should be interpreted for this schedule.
+     *
+     * <p>ABSOLUTE keeps the legacy behavior: every delay is counted from the
+     * schedule start. SEQUENTIAL executes actions one by one: every delay is
+     * counted from the previous action execution.</p>
+     */
+    private ActionDelayMode parseActionDelayMode(ConfigurationSection section) {
+        String rawMode = section.getString("action-delay-mode");
+
+        if (rawMode == null || rawMode.isBlank()) {
+            rawMode = section.getString("delay-mode");
+        }
+
+        if (rawMode == null || rawMode.isBlank()) {
+            rawMode = section.getString("execution-mode");
+        }
+
+        if (rawMode == null || rawMode.isBlank()) {
+            rawMode = section.getString("actions-mode");
+        }
+
+        return ActionDelayMode.from(rawMode);
     }
 
     /**
@@ -223,18 +252,74 @@ public final class ScheduleRepository {
         }
 
         for (String rawTime : rawTimes) {
-            try {
-                times.add(LocalTime.parse(rawTime, TIME_FORMATTER));
-            } catch (DateTimeParseException | NullPointerException exception) {
-                plugin.getLogger().warning(messageService.plain(
-                        "logs.invalid-time",
-                        "%schedule%", scheduleId,
-                        "%time%", String.valueOf(rawTime)
-                ));
+            Optional<LocalTime> parsedTime = parseFlexibleTime(rawTime);
+
+            if (parsedTime.isPresent()) {
+                times.add(parsedTime.get());
+                continue;
             }
+
+            plugin.getLogger().warning(messageService.plain(
+                    "logs.invalid-time",
+                    "%schedule%", scheduleId,
+                    "%time%", String.valueOf(rawTime)
+            ));
         }
 
         return times.stream().distinct().sorted().toList();
+    }
+
+    /**
+     * Parses user-facing schedule times without forcing server owners to write a single strict style.
+     *
+     * <p>Supported examples: {@code 18:30}, {@code 8:00}, {@code 8:00 AM},
+     * {@code 06:30 PM} and {@code 18:30 PM}. The last form is accepted as a
+     * 24-hour time with an informational meridiem suffix because many configuration
+     * files use it only for visual clarity.</p>
+     */
+    private Optional<LocalTime> parseFlexibleTime(String rawTime) {
+        if (rawTime == null || rawTime.isBlank()) {
+            return Optional.empty();
+        }
+
+        String normalized = rawTime.trim()
+                .replace('.', ' ')
+                .replaceAll("\\s+", " ")
+                .toUpperCase(Locale.ROOT)
+                .replace("A M", "AM")
+                .replace("P M", "PM");
+
+        Matcher matcher = FLEXIBLE_TIME_PATTERN.matcher(normalized);
+
+        if (!matcher.matches()) {
+            return Optional.empty();
+        }
+
+        int hour = parseRawNumber(matcher.group(1), -1);
+        int minute = parseRawNumber(matcher.group(2), -1);
+        String meridiem = matcher.group(3) == null ? "" : matcher.group(3).toUpperCase(Locale.ROOT);
+
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+            return Optional.empty();
+        }
+
+        if (!meridiem.isBlank() && hour <= 12) {
+            if (hour == 12) {
+                hour = meridiem.equals("AM") ? 0 : 12;
+            } else if (meridiem.equals("PM")) {
+                hour += 12;
+            }
+        }
+
+        return Optional.of(LocalTime.of(hour, minute));
+    }
+
+    private int parseRawNumber(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            return fallback;
+        }
     }
 
     private ScheduleRequirements parseRequirements(ConfigurationSection section) {
@@ -270,7 +355,7 @@ public final class ScheduleRepository {
 
             if (rawCommand instanceof Map<?, ?> commandMap) {
                 Object commandValue = commandMap.get("command");
-                Object delayValue = commandMap.containsKey("delay-seconds") ? commandMap.get("delay-seconds") : 0;
+                Object delayValue = firstObject(commandMap, "delay-seconds", "delay-second", "delaySeconds", "delaySecond", "delay");
 
                 int delaySeconds = parseDelay(delayValue);
                 addCommand(scheduleId, actions, String.valueOf(commandValue), delaySeconds);
@@ -298,7 +383,7 @@ public final class ScheduleRepository {
             }
 
             ActionType type = guessType(actionMap);
-            Object delayValue = actionMap.containsKey("delay-seconds") ? actionMap.get("delay-seconds") : 0;
+            Object delayValue = firstObject(actionMap, "delay-seconds", "delay-second", "delaySeconds", "delaySecond", "delay");
             int delaySeconds = parseDelay(delayValue);
 
             switch (type) {
@@ -307,6 +392,7 @@ public final class ScheduleRepository {
                 case TITLE -> addTitle(scheduleId, actions, actionMap, delaySeconds);
                 case ACTIONBAR -> addActionBar(scheduleId, actions, actionMap, delaySeconds);
                 case SOUND -> addSound(scheduleId, actions, actionMap, delaySeconds);
+                case BOSSBAR -> addBossBar(scheduleId, actions, actionMap, delaySeconds);
             }
         }
 
@@ -317,6 +403,9 @@ public final class ScheduleRepository {
         Object rawType = actionMap.get("type");
 
         if (rawType == null) {
+            if (actionMap.containsKey("bossbar") || actionMap.containsKey("boss-bar") || actionMap.containsKey("overlay") || actionMap.containsKey("style")) {
+                return ActionType.BOSSBAR;
+            }
             if (actionMap.containsKey("messages") || actionMap.containsKey("message")) {
                 return ActionType.CHAT;
             }
@@ -362,7 +451,8 @@ public final class ScheduleRepository {
                 20,
                 "",
                 1.0F,
-                1.0F
+                1.0F,
+                null
         ));
     }
 
@@ -388,7 +478,8 @@ public final class ScheduleRepository {
                 parseInt(actionMap.get("fade-out-ticks"), 20),
                 "",
                 1.0F,
-                1.0F
+                1.0F,
+                null
         ));
     }
 
@@ -413,7 +504,8 @@ public final class ScheduleRepository {
                 20,
                 "",
                 1.0F,
-                1.0F
+                1.0F,
+                null
         ));
     }
 
@@ -438,8 +530,133 @@ public final class ScheduleRepository {
                 20,
                 sound,
                 parseFloat(actionMap.get("volume"), 1.0F),
-                parseFloat(actionMap.get("pitch"), 1.0F)
+                parseFloat(actionMap.get("pitch"), 1.0F),
+                null
         ));
+    }
+
+    private void addBossBar(String scheduleId, List<ScheduledAction> actions, Map<?, ?> actionMap, int delaySeconds) {
+        String message = firstString(actionMap, "message", "title", "text", "name");
+
+        if (message == null || message.isBlank()) {
+            warnInvalidAction(scheduleId);
+            return;
+        }
+
+        int durationTicks = parseDurationTicks(actionMap, 100);
+        BossBarSettings bossBar = new BossBarSettings(
+                message,
+                firstStringOrDefault(actionMap, "PURPLE", "color", "bar-color", "barColor"),
+                firstStringOrDefault(actionMap, "PROGRESS", "overlay", "style", "bar-style", "barStyle"),
+                parseProgress(actionMap.get("progress"), 1.0F),
+                durationTicks,
+                parseBoolean(firstObject(actionMap, "decrease-progress", "decreaseProgress", "countdown", "countdown-progress"), true),
+                parseBossBarFlags(actionMap)
+        );
+
+        actions.add(new ScheduledAction(
+                ActionType.BOSSBAR,
+                Math.max(0, delaySeconds),
+                "",
+                List.of(),
+                message,
+                "",
+                "",
+                10,
+                70,
+                20,
+                "",
+                1.0F,
+                1.0F,
+                bossBar
+        ));
+    }
+
+
+
+    private List<String> parseBossBarFlags(Map<?, ?> actionMap) {
+        List<String> flags = new ArrayList<>(readStringList(firstObject(actionMap, "flags", "bar-flags", "barFlags")));
+
+        if (parseBoolean(firstObject(actionMap, "darken-screen", "darkenScreen"), false)) {
+            flags.add("DARKEN_SCREEN");
+        }
+
+        if (parseBoolean(firstObject(actionMap, "play-boss-music", "playBossMusic", "play-music", "playMusic"), false)) {
+            flags.add("PLAY_BOSS_MUSIC");
+        }
+
+        if (parseBoolean(firstObject(actionMap, "create-world-fog", "createWorldFog", "world-fog", "worldFog"), false)) {
+            flags.add("CREATE_WORLD_FOG");
+        }
+
+        return flags.stream()
+                .filter(flag -> flag != null && !flag.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private boolean parseBoolean(Object value, boolean fallback) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+
+        if (value == null) {
+            return fallback;
+        }
+
+        String normalized = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
+
+        return switch (normalized) {
+            case "true", "yes", "y", "on", "1", "enabled" -> true;
+            case "false", "no", "n", "off", "0", "disabled" -> false;
+            default -> fallback;
+        };
+    }
+
+    private int parseDurationTicks(Map<?, ?> actionMap, int fallbackTicks) {
+        Object ticksValue = firstObject(actionMap, "duration-ticks", "durationTicks", "stay-ticks", "stayTicks");
+
+        if (ticksValue != null) {
+            return Math.max(1, parseInt(ticksValue, fallbackTicks));
+        }
+
+        Object secondsValue = firstObject(actionMap, "duration-seconds", "durationSeconds", "seconds");
+
+        if (secondsValue != null) {
+            return Math.max(1, parseInt(secondsValue, Math.max(1, fallbackTicks / 20)) * 20);
+        }
+
+        return Math.max(1, fallbackTicks);
+    }
+
+    private float parseProgress(Object value, float fallback) {
+        float parsed = parseFloat(value, fallback);
+
+        if (parsed > 1.0F) {
+            parsed = parsed / 100.0F;
+        }
+
+        return Math.max(0.0F, Math.min(1.0F, parsed));
+    }
+
+    private String firstString(Map<?, ?> actionMap, String... keys) {
+        Object value = firstObject(actionMap, keys);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String firstStringOrDefault(Map<?, ?> actionMap, String fallback, String... keys) {
+        String value = firstString(actionMap, keys);
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private Object firstObject(Map<?, ?> actionMap, String... keys) {
+        for (String key : keys) {
+            if (actionMap.containsKey(key)) {
+                return actionMap.get(key);
+            }
+        }
+
+        return null;
     }
 
     private List<String> readStringList(Object value) {
@@ -510,10 +727,51 @@ public final class ScheduleRepository {
         };
     }
 
+    private Set<String> lookupVariants(String value) {
+        Set<String> keys = new LinkedHashSet<>();
+
+        if (value == null || value.isBlank()) {
+            return keys;
+        }
+
+        addLookupKey(keys, value.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_'));
+        addLookupKey(keys, placeholderKey(value));
+
+        List<String> snapshot = List.copyOf(keys);
+        for (String key : snapshot) {
+            addLookupKey(keys, compactKey(key));
+
+            if (key.startsWith("boss_")) {
+                String withoutBoss = key.substring("boss_".length());
+                addLookupKey(keys, withoutBoss);
+                addLookupKey(keys, compactKey(withoutBoss));
+            } else if (!key.isBlank()) {
+                addLookupKey(keys, "boss_" + key);
+                addLookupKey(keys, "boss" + compactKey(key));
+            }
+        }
+
+        return keys;
+    }
+
+    private void addLookupKey(Set<String> keys, String key) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+
+        keys.add(key.toLowerCase(Locale.ROOT)
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", ""));
+    }
+
+    private String compactKey(String input) {
+        return placeholderKey(input).replace("_", "");
+    }
+
     /**
-     * Convierte un ID o display-name a una llave sencilla para comandos y placeholders.
+     * Converts an ID or display-name to a safe key for commands and PlaceholderAPI.
      *
-     * <p>Ejemplo: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
+     * <p>Example: {@code "&#FF3300&lDragón Infernal"} -> {@code dragon_infernal}.</p>
      */
     private String placeholderKey(String input) {
         if (input == null || input.isBlank()) {

@@ -10,7 +10,8 @@ public enum ActionType {
     CHAT,
     TITLE,
     ACTIONBAR,
-    SOUND;
+    SOUND,
+    BOSSBAR;
 
     public static ActionType from(String rawType) {
         if (rawType == null || rawType.isBlank()) {
@@ -25,6 +26,7 @@ public enum ActionType {
             case "TITLE" -> TITLE;
             case "ACTIONBAR", "ACTION_BAR" -> ACTIONBAR;
             case "SOUND", "PLAY_SOUND" -> SOUND;
+            case "BOSSBAR", "BOSS_BAR", "BAR", "BOSSBAR_MESSAGE" -> BOSSBAR;
             default -> COMMAND;
         };
     }

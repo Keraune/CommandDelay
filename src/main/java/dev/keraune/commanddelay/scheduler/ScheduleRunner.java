@@ -4,13 +4,16 @@ import dev.keraune.commanddelay.CommandDelay;
 import dev.keraune.commanddelay.config.MessageService;
 import dev.keraune.commanddelay.config.PluginSettings;
 import dev.keraune.commanddelay.data.ExecutionHistory;
+import dev.keraune.commanddelay.model.ActionDelayMode;
 import dev.keraune.commanddelay.model.ActionType;
+import dev.keraune.commanddelay.model.BossBarSettings;
 import dev.keraune.commanddelay.model.NextActionSnapshot;
 import dev.keraune.commanddelay.model.ScheduleDefinition;
 import dev.keraune.commanddelay.model.ScheduleRequirements;
 import dev.keraune.commanddelay.model.ScheduledAction;
 import dev.keraune.commanddelay.util.PlaceholderResolver;
 import dev.keraune.commanddelay.util.TextFormatter;
+import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
@@ -23,6 +26,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -31,8 +35,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
 import java.util.Comparator;
 import java.util.Optional;
+import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
@@ -52,6 +58,10 @@ public final class ScheduleRunner {
     /** Detecta placeholders con formato %placeholder%. */
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("%[^%\\s]+%");
 
+    private static final DateTimeFormatter STATIC_TIME_24_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter STATIC_TIME_24_AMPM_FORMAT = DateTimeFormatter.ofPattern("HH:mm a", Locale.US);
+    private static final DateTimeFormatter STATIC_TIME_12_FORMAT = DateTimeFormatter.ofPattern("h:mm a", Locale.US);
+
     private final CommandDelay plugin;
     private final MessageService messageService;
     private final ScheduleRepository scheduleRepository;
@@ -69,8 +79,11 @@ public final class ScheduleRunner {
     /** Fecha y hora de inicio de cada ejecución activa. Se usa para placeholders de cuenta regresiva. */
     private final Map<String, ZonedDateTime> activeScheduleStarts = new HashMap<>();
 
-    /** Acciones con delay pendientes. Se cancelan al hacer reload/disable para evitar duplicados. */
+    /** Pending delayed actions. They are cancelled on reload/disable to prevent duplicates. */
     private final Map<String, List<BukkitTask>> pendingActionTasks = new HashMap<>();
+
+    /** Active boss bars shown by scheduled actions. They are hidden on reload/disable. */
+    private final Map<String, List<ActiveBossBar>> activeBossBars = new HashMap<>();
 
     public ScheduleRunner(
             CommandDelay plugin,
@@ -173,13 +186,30 @@ public final class ScheduleRunner {
             ZonedDateTime now,
             boolean active
     ) {
-        return schedule.actions().stream()
-                .map(action -> new NextActionSnapshot(
+        List<NextActionSnapshot> snapshots = new ArrayList<>();
+        long cumulativeDelaySeconds = 0L;
+
+        for (ScheduledAction action : schedule.actions()) {
+            if (schedule.actionDelayMode() == ActionDelayMode.SEQUENTIAL) {
+                cumulativeDelaySeconds += Math.max(0, action.delaySeconds());
+                snapshots.add(new NextActionSnapshot(
                         schedule.id(),
                         action.type(),
-                        start.plusSeconds(action.delaySeconds()),
+                        start.plusSeconds(cumulativeDelaySeconds),
                         active
-                ))
+                ));
+                continue;
+            }
+
+            snapshots.add(new NextActionSnapshot(
+                    schedule.id(),
+                    action.type(),
+                    start.plusSeconds(action.delaySeconds()),
+                    active
+            ));
+        }
+
+        return snapshots.stream()
                 .filter(snapshot -> !snapshot.dueAt().isBefore(now))
                 .min(Comparator.comparing(NextActionSnapshot::dueAt));
     }
@@ -255,21 +285,25 @@ public final class ScheduleRunner {
             return;
         }
 
+        if (schedule.actionDelayMode() == ActionDelayMode.SEQUENTIAL) {
+            executeSequentialAction(schedule, 0);
+            return;
+        }
+
+        executeAbsoluteActions(schedule, targets);
+    }
+
+    private void executeAbsoluteActions(ScheduleDefinition schedule, List<Player> initialTargets) {
         AtomicInteger remainingActions = new AtomicInteger(schedule.actions().size());
 
         for (ScheduledAction action : schedule.actions()) {
             if (action.delaySeconds() <= 0) {
-                runActionSafely(schedule, action, targets);
+                runActionSafely(schedule, action, initialTargets);
                 finishAction(schedule.id(), remainingActions);
                 continue;
             }
 
-            plugin.getLogger().info(messageService.plain(
-                    "logs.delayed-action",
-                    "%delay%", String.valueOf(action.delaySeconds()),
-                    "%action%", action.type().name(),
-                    "%schedule%", schedule.id()
-            ));
+            logDelayedAction(schedule, action);
 
             BukkitTask delayedTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 try {
@@ -281,6 +315,46 @@ public final class ScheduleRunner {
 
             registerPendingAction(schedule.id(), delayedTask);
         }
+    }
+
+    private void executeSequentialAction(ScheduleDefinition schedule, int actionIndex) {
+        if (!isActive(schedule.id())) {
+            return;
+        }
+
+        if (actionIndex >= schedule.actions().size()) {
+            finishExecution(schedule.id());
+            return;
+        }
+
+        ScheduledAction action = schedule.actions().get(actionIndex);
+
+        Runnable executor = () -> {
+            try {
+                runActionSafely(schedule, action, eligiblePlayers(schedule));
+            } finally {
+                executeSequentialAction(schedule, actionIndex + 1);
+            }
+        };
+
+        if (action.delaySeconds() <= 0) {
+            executor.run();
+            return;
+        }
+
+        logDelayedAction(schedule, action);
+
+        BukkitTask delayedTask = Bukkit.getScheduler().runTaskLater(plugin, executor, action.delayTicks());
+        registerPendingAction(schedule.id(), delayedTask);
+    }
+
+    private void logDelayedAction(ScheduleDefinition schedule, ScheduledAction action) {
+        plugin.getLogger().info(messageService.plain(
+                "logs.delayed-action",
+                "%delay%", String.valueOf(action.delaySeconds()),
+                "%action%", action.type().name(),
+                "%schedule%", schedule.id()
+        ));
     }
 
     private void runActionSafely(ScheduleDefinition schedule, ScheduledAction action, List<Player> targets) {
@@ -345,8 +419,55 @@ public final class ScheduleRunner {
         }
 
         pendingActionTasks.clear();
+        hideActiveBossBars();
         activeSchedules.clear();
         activeScheduleStarts.clear();
+    }
+
+    private void registerActiveBossBar(String scheduleId, ActiveBossBar activeBossBar) {
+        activeBossBars.computeIfAbsent(scheduleId, ignored -> new ArrayList<>()).add(activeBossBar);
+    }
+
+    private void hideBossBar(String scheduleId, Player player, BossBar bossBar) {
+        List<ActiveBossBar> views = activeBossBars.get(scheduleId);
+
+        if (views == null) {
+            player.hideBossBar(bossBar);
+            return;
+        }
+
+        views.removeIf(view -> {
+            boolean matches = view.player().getUniqueId().equals(player.getUniqueId()) && view.bossBar() == bossBar;
+
+            if (matches) {
+                cancelTask(view.progressTask());
+                view.player().hideBossBar(view.bossBar());
+            }
+
+            return matches;
+        });
+
+        if (views.isEmpty()) {
+            activeBossBars.remove(scheduleId);
+        }
+    }
+
+    private void hideActiveBossBars() {
+        for (List<ActiveBossBar> views : activeBossBars.values()) {
+            for (ActiveBossBar view : views) {
+                cancelTask(view.hideTask());
+                cancelTask(view.progressTask());
+                view.player().hideBossBar(view.bossBar());
+            }
+        }
+
+        activeBossBars.clear();
+    }
+
+    private void cancelTask(BukkitTask taskToCancel) {
+        if (taskToCancel != null && !taskToCancel.isCancelled()) {
+            taskToCancel.cancel();
+        }
     }
 
     private void logRequirementsFailed(ScheduleDefinition schedule, int onlineTargets) {
@@ -398,6 +519,7 @@ public final class ScheduleRunner {
             case TITLE -> sendTitle(schedule, action, targets);
             case ACTIONBAR -> sendActionBar(schedule, action, targets);
             case SOUND -> playSound(action, targets);
+            case BOSSBAR -> sendBossBar(schedule, action, targets);
             case COMMAND -> executeCommand(schedule, action, targets);
         }
     }
@@ -487,6 +609,121 @@ public final class ScheduleRunner {
         }
     }
 
+    private void sendBossBar(ScheduleDefinition schedule, ScheduledAction action, List<Player> targets) {
+        BossBarSettings bossBarSettings = action.bossBar();
+
+        if (bossBarSettings == null) {
+            return;
+        }
+
+        BossBar.Color color = bossBarColor(bossBarSettings.color());
+        BossBar.Overlay overlay = bossBarOverlay(bossBarSettings.overlay());
+        Set<BossBar.Flag> flags = bossBarFlags(bossBarSettings.flags());
+        long durationTicks = Math.max(1L, bossBarSettings.durationTicks());
+        float initialProgress = Math.max(0.0F, Math.min(1.0F, bossBarSettings.progress()));
+
+        for (Player player : targets) {
+            Map<String, String> placeholders = placeholders(schedule, player, targets.size());
+            Component name = component(bossBarSettings.message(), player, placeholders);
+            BossBar bossBar = BossBar.bossBar(name, initialProgress, color, overlay);
+
+            for (BossBar.Flag flag : flags) {
+                bossBar.addFlag(flag);
+            }
+
+            player.showBossBar(bossBar);
+
+            BukkitTask progressTask = createBossBarProgressTask(bossBarSettings, bossBar, durationTicks, initialProgress);
+            BukkitTask hideTask = Bukkit.getScheduler().runTaskLater(
+                    plugin,
+                    () -> hideBossBar(schedule.id(), player, bossBar),
+                    durationTicks
+            );
+
+            registerActiveBossBar(schedule.id(), new ActiveBossBar(player, bossBar, hideTask, progressTask));
+        }
+    }
+
+    private BukkitTask createBossBarProgressTask(
+            BossBarSettings bossBarSettings,
+            BossBar bossBar,
+            long durationTicks,
+            float initialProgress
+    ) {
+        if (!bossBarSettings.decreaseProgress() || initialProgress <= 0.0F) {
+            return null;
+        }
+
+        return Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
+            private long elapsedTicks = 0L;
+
+            @Override
+            public void run() {
+                elapsedTicks++;
+                float remainingRatio = Math.max(0.0F, (durationTicks - elapsedTicks) / (float) durationTicks);
+                bossBar.progress(Math.max(0.0F, initialProgress * remainingRatio));
+            }
+        }, 1L, 1L);
+    }
+
+    private BossBar.Color bossBarColor(String rawColor) {
+        String normalized = normalizeEnum(rawColor);
+
+        return switch (normalized) {
+            case "PINK" -> BossBar.Color.PINK;
+            case "BLUE" -> BossBar.Color.BLUE;
+            case "RED" -> BossBar.Color.RED;
+            case "GREEN" -> BossBar.Color.GREEN;
+            case "YELLOW" -> BossBar.Color.YELLOW;
+            case "WHITE" -> BossBar.Color.WHITE;
+            case "PURPLE" -> BossBar.Color.PURPLE;
+            default -> BossBar.Color.PURPLE;
+        };
+    }
+
+    private BossBar.Overlay bossBarOverlay(String rawOverlay) {
+        String normalized = normalizeEnum(rawOverlay);
+
+        return switch (normalized) {
+            case "SOLID", "PROGRESS" -> BossBar.Overlay.PROGRESS;
+            case "SEGMENTED_6", "NOTCHED_6", "NOTCHES_6", "6" -> BossBar.Overlay.NOTCHED_6;
+            case "SEGMENTED_10", "NOTCHED_10", "NOTCHES_10", "10" -> BossBar.Overlay.NOTCHED_10;
+            case "SEGMENTED_12", "NOTCHED_12", "NOTCHES_12", "12" -> BossBar.Overlay.NOTCHED_12;
+            case "SEGMENTED_20", "NOTCHED_20", "NOTCHES_20", "20" -> BossBar.Overlay.NOTCHED_20;
+            default -> BossBar.Overlay.PROGRESS;
+        };
+    }
+
+    private Set<BossBar.Flag> bossBarFlags(List<String> rawFlags) {
+        EnumSet<BossBar.Flag> flags = EnumSet.noneOf(BossBar.Flag.class);
+
+        for (String rawFlag : rawFlags) {
+            String normalized = normalizeEnum(rawFlag);
+
+            switch (normalized) {
+                case "DARKEN_SCREEN", "DARKEN", "DARK" -> flags.add(BossBar.Flag.DARKEN_SCREEN);
+                case "PLAY_BOSS_MUSIC", "BOSS_MUSIC", "PLAY_MUSIC", "MUSIC" -> flags.add(BossBar.Flag.PLAY_BOSS_MUSIC);
+                case "CREATE_WORLD_FOG", "WORLD_FOG", "FOG" -> flags.add(BossBar.Flag.CREATE_WORLD_FOG);
+                default -> {
+                    // Unknown flags are ignored to keep reloads safe on user-edited YAML files.
+                }
+            }
+        }
+
+        return flags;
+    }
+
+    private String normalizeEnum(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        return value.trim()
+                .toUpperCase(java.util.Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
+    }
+
     private Component component(String text, Player player, Map<String, String> placeholders) {
         String resolved = PlaceholderResolver.resolve(
                 plugin,
@@ -530,6 +767,12 @@ public final class ScheduleRunner {
         placeholders.put("%event_name%", TextFormatter.legacy(schedule.displayName()));
         placeholders.put("%schedule_plain_name%", TextFormatter.plain(schedule.displayName()));
         placeholders.put("%schedule_raw_name%", schedule.displayName());
+        placeholders.put("%schedule_time_24%", scheduleTime(schedule, "time_24"));
+        placeholders.put("%schedule_time_24_ampm%", scheduleTime(schedule, "time_24_ampm"));
+        placeholders.put("%schedule_time_12%", scheduleTime(schedule, "time_12"));
+        placeholders.put("%schedule_times_24%", scheduleTime(schedule, "times_24"));
+        placeholders.put("%schedule_times_24_ampm%", scheduleTime(schedule, "times_24_ampm"));
+        placeholders.put("%schedule_times_12%", scheduleTime(schedule, "times_12"));
         placeholders.put("%online%", String.valueOf(Bukkit.getOnlinePlayers().size()));
         placeholders.put("%targets%", String.valueOf(targetCount));
         placeholders.put("%min_players%", String.valueOf(schedule.requirements().minPlayersOnline()));
@@ -551,6 +794,31 @@ public final class ScheduleRunner {
         return placeholders;
     }
 
+
+    private String scheduleTime(ScheduleDefinition schedule, String type) {
+        List<LocalTime> times = schedule.times();
+
+        if (times.isEmpty()) {
+            return "";
+        }
+
+        if (!type.startsWith("times_")) {
+            return formatStaticTime(times.getFirst(), type);
+        }
+
+        return String.join(", ", times.stream()
+                .map(time -> formatStaticTime(time, type))
+                .toList());
+    }
+
+    private String formatStaticTime(LocalTime time, String type) {
+        return switch (type) {
+            case "time_12", "times_12" -> time.format(STATIC_TIME_12_FORMAT);
+            case "time_24_ampm", "times_24_ampm" -> time.format(STATIC_TIME_24_AMPM_FORMAT);
+            default -> time.format(STATIC_TIME_24_FORMAT);
+        };
+    }
+
     private Duration ticks(int ticks) {
         return Duration.ofMillis(Math.max(0, ticks) * 50L);
     }
@@ -570,5 +838,8 @@ public final class ScheduleRunner {
             ));
             exception.printStackTrace();
         }
+    }
+
+    private record ActiveBossBar(Player player, BossBar bossBar, BukkitTask hideTask, BukkitTask progressTask) {
     }
 }
